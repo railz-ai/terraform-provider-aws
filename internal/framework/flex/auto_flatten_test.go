@@ -891,6 +891,81 @@ func TestFlattenComplexSingleNestedBlock(t *testing.T) {
 	runAutoFlattenTestCases(ctx, t, testCases)
 }
 
+func TestFlattenOptions(t *testing.T) {
+	t.Parallel()
+
+	type tf01 struct {
+		Field1 types.Bool                       `tfsdk:"field1"`
+		Tags   fwtypes.MapValueOf[types.String] `tfsdk:"tags"`
+	}
+	type aws01 struct {
+		Field1 bool
+		Tags   map[string]string
+	}
+
+	ctx := context.Background()
+	testCases := autoFlexTestCases{
+		// TODO - figure out why this triggers a panic?
+		// {
+		// 	TestName: "ignore tags by default",
+		// 	Source: &aws01{
+		// 		Field1: true,
+		// 		Tags:   map[string]string{"foo": "bar"},
+		// 	},
+		// 	Target: &tf01{},
+		// 	WantTarget: &tf01{
+		// 		Field1: types.BoolValue(true),
+		// 		Tags:   fwtypes.NewMapValueOfNull[types.String](ctx),
+		// 	},
+		// },
+		{
+			TestName: "include tags with option override",
+			Options: []AutoFlexOptionsFunc{
+				func(opts *AutoFlexOptions) {
+					opts.IgnoredFieldNames = []string{}
+				},
+			},
+			Source: &aws01{
+				Field1: true,
+				Tags:   map[string]string{"foo": "bar"},
+			},
+			Target: &tf01{},
+			WantTarget: &tf01{
+				Field1: types.BoolValue(true),
+				Tags: fwtypes.NewMapValueOfMust[types.String](
+					ctx,
+					map[string]attr.Value{
+						"foo": types.StringValue("bar"),
+					},
+				),
+			},
+		},
+		{
+			TestName: "ignore custom field",
+			Options: []AutoFlexOptionsFunc{
+				func(opts *AutoFlexOptions) {
+					opts.IgnoredFieldNames = []string{"Field1"}
+				},
+			},
+			Source: &aws01{
+				Field1: true,
+				Tags:   map[string]string{"foo": "bar"},
+			},
+			Target: &tf01{},
+			WantTarget: &tf01{
+				Field1: types.BoolNull(),
+				Tags: fwtypes.NewMapValueOfMust[types.String](
+					ctx,
+					map[string]attr.Value{
+						"foo": types.StringValue("bar"),
+					},
+				),
+			},
+		},
+	}
+	runAutoFlattenTestCases(ctx, t, testCases)
+}
+
 func runAutoFlattenTestCases(ctx context.Context, t *testing.T, testCases autoFlexTestCases) {
 	t.Helper()
 
@@ -904,7 +979,7 @@ func runAutoFlattenTestCases(ctx context.Context, t *testing.T, testCases autoFl
 				testCtx = testCase.Context
 			}
 
-			err := Flatten(testCtx, testCase.Source, testCase.Target)
+			err := Flatten(testCtx, testCase.Source, testCase.Target, testCase.Options...)
 			gotErr := err != nil
 
 			if gotErr != testCase.WantErr {

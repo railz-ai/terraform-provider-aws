@@ -27,10 +27,33 @@ const (
 // autoFlexer is the interface implemented by an auto-flattener or expander.
 type autoFlexer interface {
 	convert(context.Context, reflect.Value, reflect.Value) diag.Diagnostics
+	getOptions() AutoFlexOptions
 }
 
+// AutoFlexOptions stores configurable options for an auto-flattener or expander.
+type AutoFlexOptions struct {
+	// IgnoredFieldNames stores names which expanders and flatteners will
+	// not read from or write to
+	IgnoredFieldNames []string
+}
+
+func (o *AutoFlexOptions) IgnoreField(s string) bool {
+	for _, name := range o.IgnoredFieldNames {
+		if s == name {
+			return true
+		}
+	}
+	return false
+}
+
+var (
+	DefaultIgnoredFieldNames = []string{
+		"Tags", // Resource tags are handled separately.
+	}
+)
+
 // AutoFlexOptionsFunc is a type alias for an autoFlexer functional option.
-type AutoFlexOptionsFunc func(autoFlexer)
+type AutoFlexOptionsFunc func(*AutoFlexOptions)
 
 // autoFlexConvert converts `from` to `to` using the specified auto-flexer.
 func autoFlexConvert(ctx context.Context, from, to any, flexer autoFlexer) diag.Diagnostics {
@@ -86,14 +109,15 @@ func autoFlexConvertStruct(ctx context.Context, from any, to any, flexer autoFle
 		return diags
 	}
 
+	opts := flexer.getOptions()
 	for i, typFrom := 0, valFrom.Type(); i < typFrom.NumField(); i++ {
 		field := typFrom.Field(i)
 		if field.PkgPath != "" {
 			continue // Skip unexported fields.
 		}
 		fieldName := field.Name
-		if fieldName == "Tags" {
-			continue // Resource tags are handled separately.
+		if opts.IgnoreField(fieldName) {
+			continue
 		}
 		if fieldName == MapBlockKey {
 			continue
